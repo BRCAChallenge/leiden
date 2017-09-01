@@ -194,21 +194,23 @@ class _LOVD3Database(LeidenDatabase):
         self._available_genes = self._genes()
 
     def _genes(self):
-        # Construct URL of page containing the drop-down to select various genes
-        start_url = "".join([self._leiden_url, 'genes/', '?page_size=1000&page=1'])
-
-        # Download and parse HTML from base URL
-        html = web_io.get_page_html(start_url)
-        url_soup = BeautifulSoup(html)
-
-        # Extract all gene entries from the lovd homepage
-        table_class = 'data'
-        options = url_soup.find_all('tr', class_=table_class)
-
         available_genes = []
-        for genes in options:
-            gene_string = genes.find_all('td')[0].find('a').string
-            available_genes.append(gene_string)
+        for i in xrange(1,24):
+            # Construct URL of page containing the drop-down to select various genes
+            url_string = '?page_size=1000&page='+str(i)
+            start_url = "".join([self._leiden_url, 'genes/', url_string])
+
+            # Download and parse HTML from base URL
+            html = web_io.get_page_html(start_url)
+            url_soup = BeautifulSoup(html)
+
+            # Extract all gene entries from the lovd homepage
+            table_class = 'data'
+            options = url_soup.find_all('tr', class_=table_class)
+
+            for genes in options:
+                gene_string = genes.find_all('td')[0].find('a').string
+                available_genes.append(gene_string)
         return available_genes
 
     def get_gene_data(self, gene_id):
@@ -278,7 +280,6 @@ class GeneData:
             str: URL linking to the homepage for this gene.
 
         """
-
         raise NotImplementedError('Abstract method')
 
     def _get_gene_homepage_html(self):
@@ -311,7 +312,7 @@ class GeneData:
         transcript_id = self.transcript_refseqid()
         for links in link_result_set:
             link_url = links.get('href')
-
+            
             # Process HGVS notation
             if links.string and ('c.' in links.string or 'p.' in links.string):
                 hgvs_notation = utilities.remove_times_reported(links.string)
@@ -343,8 +344,12 @@ class GeneData:
             label = 'protein_change'
         elif 'genomic' in label:
             label = 'dna_change_genomic'
-        elif 'dna' in label:
+        elif ('dna' in label) and not ('bic' in label):
             label = 'dna_change'
+        
+        # Some databases return bad headers
+        if label in ['__first','__prev', 'next__', 'last__']:
+            label = 'BADLABEL'
 
         return label
 
@@ -363,7 +368,7 @@ class GeneData:
         for tags in entries:
             # NM_ is unique substring to RefSeq ID. If found, return text.
             if 'NM_' in tags.get_text():
-                return tags.get_text()
+                return re.sub(r'\.[0-9]*', '', tags.get_text())
         return ''
 
     def columns(self):
@@ -389,10 +394,13 @@ class GeneData:
         """
 
         total_variant_count = self.variant_count()
+        print('total_variant_count: ', total_variant_count)
 
         # Calculate the number of pages website will use to present data
         variants_per_page = 1000  # max allowed value
         total_pages = int(math.ceil(float(total_variant_count)/float(variants_per_page)))
+        
+        print('total_pages: ', total_pages)
 
         # Get table data from all pages
         table_data = []
@@ -468,13 +476,14 @@ class _LOVD2GeneData(GeneData):
         result = []
         for entries in headers:
             # Column label text
-            h = entries.string
+            h = entries.text
 
             # For all entries with a string value, add them to the results (filters out extraneous th tags)
-            if h is not None:
+            if (h is not None) and ('\n' not in h):
                 # Normalize headers so all lower-case, no whitespace, no non-alphanumeric characters
                 h = GeneData._normalize_label(h)
-                result.append(h)
+                if h not in result:
+                    result.append(h)
 
         return result
 
@@ -491,10 +500,12 @@ class _LOVD2GeneData(GeneData):
             database_soup = self._database_soup
 
         # id specific to data table in HTML (must be unicode due to underscore)
-        table_id = "".join([u'table', u'\u005F', u'data'])
+        ##table_id = "".join([u'table', u'\u005F', u'data'])
+        table_class = u'data'
 
         # Extract the HTML specific to the table data
-        table = database_soup.find_all(id=table_id)[0].find_all('tr')
+        ##table = database_soup.find_all(id=table_id)[0].find_all('tr')
+        table = database_soup.find_all('table', class_="data")[0].find_all('tr', valign="top")
 
         # First row may contain a row of images for some reason. Filter out if present.
         if table[0].find('img') is not None:
@@ -505,10 +516,22 @@ class _LOVD2GeneData(GeneData):
             entries = []
             for columns in rows.find_all('td'):
                 # If there are any links in the cell, process them with get_link_info
-                if columns.find('a') is not None:
-                    link_string = self._get_link_urls(columns.find_all('a'))
-                    link_string = re.sub(r'\s', '', link_string)  # ensure there is no whitespace
-                    entries.append(link_string)
+                ##if columns.find('a') is not None:
+                ##    link_string = self._get_link_urls(columns.find_all('a'))
+                ##    link_string = re.sub(r'\s', '', link_string)  # ensure there is no whitespace
+                ##    entries.append(link_string)
+                if ('c.' in columns.get_text() or 'p.' in columns.get_text()):
+                    # Process HGVS notation
+                    transcript_id = self.transcript_refseqid() 
+                    if self._gene_id == 'BRCA1':
+                        transcript_id = 'NM_007294'
+                    elif self._gene_id == 'BRCA2':
+                        transcript_id = 'NM_000059'
+                    hgvs_notation = utilities.remove_times_reported(columns.get_text())
+                    hgvs_notation = utilities.correct_hgvs_parentheses(hgvs_notation)
+                    hgvs_string = "".join([transcript_id, ':', hgvs_notation])
+                    hgvs_string = re.sub(r'\s', ' ', hgvs_string)  # ensure there is no non-space whitespace 
+                    entries.append(hgvs_string)
                 else:
                     column_string = columns.string.strip()  # ensure there is no whitespace
                     column_string = re.sub(r'\s', ' ', column_string)
@@ -533,8 +556,8 @@ class _LOVD3GeneData(GeneData):
         return "".join([self._leiden_home_url, 'variants/', self._gene_id, '?page_size=1000&page=1'])
 
     def _get_gene_homepage_url(self):
-
-        return "".join([self._leiden_home_url, 'genes/', self._gene_id, '?page_size=1000&page=1'])
+        
+        return "".join([self._leiden_home_url, 'genes/', self._gene_id])
 
     def columns(self):
 
@@ -548,6 +571,7 @@ class _LOVD3GeneData(GeneData):
             # For all entries with a string value, add them to the results (filters out extraneous th tags)
             if h is not None:
                 h = GeneData._normalize_label(h)
+                if h == 'BADLABEL': continue
                 result.append(h)
 
         return result
@@ -586,10 +610,18 @@ class _LOVD3GeneData(GeneData):
             entries = []
             for columns in rows.find_all('td'):
                 # If there are any links in the cell, process them with get_link_info
-                if columns.find('a') is not None:
+                if (columns.find('a') is not None) or ("ordered" in columns):
                     link_string = self._get_link_urls(columns.find_all('a'))
                     link_string = re.sub(r'\s', '', link_string)  # ensure there is no whitespace
                     entries.append(link_string)
+                elif ('c.' in columns.get_text() or 'p.' in columns.get_text()):
+                    # Process HGVS notation
+                    transcript_id = self.transcript_refseqid()
+                    hgvs_notation = utilities.remove_times_reported(columns.get_text())
+                    hgvs_notation = utilities.correct_hgvs_parentheses(hgvs_notation)
+                    hgvs_string = "".join([transcript_id, ':', hgvs_notation])
+                    hgvs_string = re.sub(r'\s', ' ', hgvs_string)  # ensure there is no non-space whitespace 
+                    entries.append(hgvs_string)
                 else:
                     column_string = columns.string.strip()
                     column_string = re.sub(r'\s', ' ', column_string)  # ensure there is no non-space whitespace

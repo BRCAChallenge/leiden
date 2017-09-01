@@ -25,9 +25,9 @@ def annotate_vep(input_file, output_file):
 
     if platform.system() == 'Darwin':
         command.append("--compress")
-        command.append("gunzip -c")
+        command.append("'gunzip -c'")
 
     command = ' '.join(command)
-
+    
     pipe = subprocess.Popen(command, shell=True)
     pipe.communicate()[0]

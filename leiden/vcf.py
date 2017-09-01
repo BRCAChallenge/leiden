@@ -1,10 +1,10 @@
 import re
 import pandas as pd
-from _ordereddict import ordereddict
+from ordereddict import OrderedDict
 
 VCF_HEADER_PREFIX = '#'
 VCF_DELIMITER = '\t'
-FORMAT_DELIMITER = '|'
+FORMAT_DELIMITER = ';'
 
 
 def get_vcf_header_lines(vcf_file):
@@ -132,10 +132,10 @@ class VCFReader():
         line = self._file_object.next()
         line = line.strip()
         columns = line.split(VCF_DELIMITER)
-        vcf_dict = ordereddict(zip(self.columns, columns))
+        vcf_dict = OrderedDict(zip(self.columns, columns))
 
-        vcf_dict['INFO'] = self._get_info_dict(vcf_dict['INFO'])
-        return VCFLine(vcf_dict)
+        vcf_dict['INFO'], wierd_lovd_tag = self._get_info_dict(vcf_dict['INFO'])
+        return VCFLine(vcf_dict), wierd_lovd_tag
 
     def _get_info_dict(self, info_text):
         """
@@ -150,15 +150,22 @@ class VCFReader():
 
         """
         tags = [x.split('=') for x in info_text.split(';')]
-        info_dict = ordereddict(tags)
+        info_dict = OrderedDict(tags)
+
+        wierd_lovd_tag = False
 
         for tag in info_dict:
+            backupTag = tag
+            if tag == '"LOVD':
+                wierd_lovd_tag = True
+                tag = 'LOVD'
+                    
             if 'format' in self.infos[tag]:
                 result = []
-                for entry in info_dict[tag].split(','):
-                    result.append(ordereddict(zip(self.infos[tag]['format'], entry.split(FORMAT_DELIMITER))))
-                info_dict[tag] = result
-        return info_dict
+                for entry in info_dict[backupTag].split(','):
+                    result.append(OrderedDict(zip(self.infos[tag]['format'], entry.split(FORMAT_DELIMITER))))
+                info_dict[backupTag] = result
+        return info_dict, wierd_lovd_tag
 
 
 class VCFLine:
@@ -259,7 +266,7 @@ def get_vcf_info_header(data_frame, tag_id, description):
     """
 
     format_string = FORMAT_DELIMITER.join(data_frame.columns).upper()
-    return '##INFO=<ID=' + tag_id + ',Number=.,TYPE=String,Description="' + description + ' Format: ' + format_string + '">'
+    return '##INFO=<ID=' + tag_id + ',Number=.,Type=String,Description="' + description + ' Format: ' + format_string + '">'
 
 
 def _map_to_genomic_coordinates(hgvs_variant, remapper):
@@ -281,7 +288,7 @@ def _map_to_genomic_coordinates(hgvs_variant, remapper):
         return pd.Series({'CHROM': '.', 'POS': '.', 'ID': '.', 'REF': '.', 'ALT': '.'})
 
 
-def convert_to_vcf_format(data_frame, remapper, hgvs_column, info_tag):
+def convert_to_vcf_format(data_frame, remapper, hgvs_column, info_tag_list):
     """
     Converts a pandas dataframe that contains HGVS variants along with other data about the variants to a VCF representation.
     All data fields for each entry are included in the INFO field in info_tag=column1|column2| ... format.
@@ -301,7 +308,7 @@ def convert_to_vcf_format(data_frame, remapper, hgvs_column, info_tag):
     data_frame = _convert_to_vcf_friendly_text(data_frame)
 
     vcf_format = data_frame[hgvs_column].apply(_map_to_genomic_coordinates, args=[remapper])
-    info = info_tag + '=' + data_frame.apply(lambda row: FORMAT_DELIMITER.join(map(str, row)), axis=1)
+    info = data_frame.apply(lambda row: FORMAT_DELIMITER.join(map(lambda label: label+'='+str(row[label]), info_tag_list)), axis=1)
     vcf_format['INFO'] = info
     vcf_format['FILTER'] = '.'
     vcf_format['QUAL'] = '.'
