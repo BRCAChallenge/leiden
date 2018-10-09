@@ -4,6 +4,14 @@ import math
 from bs4 import BeautifulSoup
 from . import web_io, utilities
 
+import os
+
+PARSER = 'html.parser'  # default parser, any other might break
+PARSER_ENV_VAR = "BEAUTIFUL_SOUP_LEIDEN_PARSER"
+
+if PARSER_ENV_VAR in os.environ:
+    PARSER = os.environ[PARSER_ENV_VAR]
+
 
 def make_leiden_database(leiden_url):
     """
@@ -161,7 +169,7 @@ class _LOVD2Database(LeidenDatabase):
 
         # Download and parse HTML from base URL
         html = web_io.get_page_html(start_url)
-        url_soup = BeautifulSoup(html)
+        url_soup = BeautifulSoup(html, PARSER)
 
         # Extract all options from the SelectGeneDB drop-down control
         options = url_soup.find(id='SelectGeneDB').find_all('option')
@@ -202,7 +210,7 @@ class _LOVD3Database(LeidenDatabase):
 
             # Download and parse HTML from base URL
             html = web_io.get_page_html(start_url)
-            url_soup = BeautifulSoup(html)
+            url_soup = BeautifulSoup(html, PARSER)
 
             # Extract all gene entries from the lovd homepage
             table_class = 'data'
@@ -245,10 +253,10 @@ class GeneData:
 
         # Extract HTML and create BeautifulSoup objects for gene_id pages
         html = self._get_variant_database_html()
-        self._database_soup = BeautifulSoup(html)
+        self._database_soup = BeautifulSoup(html, PARSER)
 
         html = self._get_gene_homepage_html()
-        self._gene_homepage_soup = BeautifulSoup(html)
+        self._gene_homepage_soup = BeautifulSoup(html, PARSER)
 
     def _get_variant_database_url(self):
         """
@@ -495,7 +503,7 @@ class _LOVD2GeneData(GeneData):
             page_url = self._get_variant_database_url() + '&page=' + str(page_number)
 
             html = web_io.get_page_html(page_url)
-            database_soup = BeautifulSoup(html)
+            database_soup = BeautifulSoup(html, PARSER)
         else:
             database_soup = self._database_soup
 
@@ -584,7 +592,7 @@ class _LOVD3GeneData(GeneData):
             page_url = self._get_variant_database_url() + '&page=' + str(page_number)
 
             html = web_io.get_page_html(page_url)
-            database_soup = BeautifulSoup(html)
+            database_soup = BeautifulSoup(html, PARSER)
         else:
             database_soup = self._database_soup
 
